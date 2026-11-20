@@ -17,13 +17,14 @@ input,select{width:100%;box-sizing:border-box;margin:4px 0}.r{display:flex;gap:8
 import{initializeApp}from"https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
 import{getAuth,GoogleAuthProvider,signInWithPopup,onAuthStateChanged,signOut}from"https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
 import{getFirestore,collection,doc,getDoc,setDoc,addDoc,updateDoc,deleteDoc,onSnapshot}from"https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
+import{getMessaging,getToken,onMessage}from"https://www.gstatic.com/firebasejs/10.14.1/firebase-messaging.js";
 const app=initializeApp({apiKey:"AIzaSyAkmRRIwMgL6010-69IKBxPgI_Vk5pTDB4",authDomain:"iceta-family.firebaseapp.com",projectId:"iceta-family",storageBucket:"iceta-family.firebasestorage.app",messagingSenderId:"865254703231",appId:"1:865254703231:web:1c14f31ad46ac751fb3f4a"});
 const auth=getAuth(app),db=getFirestore(app),A=document.getElementById("app"),$=i=>document.getElementById(i);
 const IOS=/iPhone|iPad|iPod/.test(navigator.userAgent),ADMIN="lknizeta@gmail.com",HASH="49faaade493be8b6b6164ee67f7e4d101812a5dda970d6ca693dda8b8cf82e4b";
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const F=d=>d.toLocaleString("es-ES",{weekday:"short",day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"});
 const sha=async s=>[...new Uint8Array(await crypto.subtle.digest("SHA-256",new TextEncoder().encode(s)))].map(b=>b.toString(16).padStart(2,"0")).join("");
-let me=null,evs=[],polls=[],pun=[],users={},shared=[],tab="cal",ok=sessionStorage.getItem("k")=="1",started=false;
+let me=null,evs=[],polls=[],pun=[],users={},shared=[],toks=[],cfg=[],tab="cal",ok=sessionStorage.getItem("k")=="1",started=false;
 const isAdm=()=>me.email==ADMIN;
 const HAB=[["💶 Gastos",21],["🧾 Pagos",28]];
 function habitos(){const o=[],n=new Date();for(let i=0;i<12;i++)for(const[t,d]of HAB)o.push({id:`h${i}${d}`,title:t,start:new Date(n.getFullYear(),n.getMonth()+i,d,20,0),fixed:true});return o}
@@ -36,11 +37,12 @@ const r=doc(db,"users",u.uid);let s=await getDoc(r);
 if(!s.exists()){let role=IOS?"padre":await pick();await setDoc(r,{name:u.displayName,email:u.email,role});s=await getDoc(r)}
 me={uid:u.uid,...s.data()};if(started)return;started=true;
 const sub=(n,f)=>onSnapshot(collection(db,n),q=>{f(q.docs.map(d=>({id:d.id,...d.data()})));draw()});
-sub("events",a=>{evs=a.map(e=>({...e,start:new Date(e.start)}))});sub("polls",a=>{polls=a});sub("punishments",a=>{pun=a});sub("shared",a=>{shared=a});sub("users",a=>{users=Object.fromEntries(a.map(x=>[x.id,x]))})});
+sub("events",a=>{evs=a.map(e=>({...e,start:new Date(e.start)}))});sub("polls",a=>{polls=a});sub("punishments",a=>{pun=a});sub("tokens",a=>{toks=a});sub("config",a=>{cfg=a});sub("shared",a=>{shared=a});sub("users",a=>{users=Object.fromEntries(a.map(x=>[x.id,x]))})});
 function vCal(){const now=Date.now()-864e5,all=[...evs,...habitos()].filter(e=>e.start>=now).sort((a,b)=>a.start-b.start);let day="",h="";
 for(const e of all){const k=e.start.toLocaleDateString("es-ES",{weekday:"long",day:"numeric",month:"long"});if(k!==day){day=k;h+=`<div class="d">${k}</div>`}
 h+=`<div class="c r ${e.fixed?"f":""}"><span>${e.start.toLocaleTimeString("es-ES",{hour:"2-digit",minute:"2-digit"})} · ${esc(e.title)}${e.fixed?" 🔒":""}</span>${e.fixed?"":`<span><button class="g" data-a="e|${e.id}">✏️</button> <button class="g" data-a="x|${e.id}">🗑️</button></span>`}</div>`}
-return`<div class="c"><input id="t" placeholder="Nuevo evento"><input id="w" type="datetime-local"><button id="a">Añadir</button></div>${h}`}
+const on=toks.some(x=>x.id==me.uid);
+return`<div class="c r"><span>🔔 ${on?"Avisos activados":"Avisos desactivados"}</span><button class="g" data-a="av">${on?"Reactivar":"Activar avisos"}</button></div><div class="c"><input id="t" placeholder="Nuevo evento"><input id="w" type="datetime-local"><button id="a">Añadir</button></div>${h}`}
 function vEnc(){return`<div class="c"><b>Proponer un plan</b><input id="pt" placeholder="¿Qué plan?"><input id="pw" type="datetime-local"><button id="pa">Proponer</button></div>`+
 polls.sort((a,b)=>new Date(a.start)-new Date(b.start)).map(p=>{const v=p.votes||{},n=Object.values(v),si=n.filter(x=>x=="si").length,no=n.length-si,my=v[me.uid];
 return`<div class="c"><b>${esc(p.title)}</b><br>${F(new Date(p.start))}<br>👍 ${si} · 👎 ${no} · <i>${p.status}</i>`+
@@ -62,7 +64,7 @@ function vTab(){const l=pun.filter(p=>p.pub).sort((a,b)=>b.at-a.at);return l.len
 function vAdm(){if(!isAdm())return`<div class="c">Solo para el admin.</div>`;
 if(!ok)return`<div class="c"><input id="k" type="password" placeholder="Clave de admin"><button id="kk">Entrar</button></div>`;
 const past=evs.filter(e=>e.start<Date.now()&&e.start>Date.now()-12096e5&&!e.ev).sort((a,b)=>b.start-a.start);
-return`<div class="c"><b>Nuevo castigo</b><input id="xt" placeholder="Castigo"><select id="xr">${["todos","madre","hijo 1","hijo 2","padre"].map(x=>`<option>${x}</option>`).join("")}</select><button id="xa">Publicar en el tablón</button></div>
+return`<div class="c"><b>Avisos antes de cada evento (minutos)</b><input id="rm" value="${(cfg.find(x=>x.id=="reminders")?.mins||[1440,360,60,30,10]).join(",")}"><button id="rg">Guardar avisos</button></div><div class="c"><b>Nuevo castigo</b><input id="xt" placeholder="Castigo"><select id="xr">${["todos","madre","hijo 1","hijo 2","padre"].map(x=>`<option>${x}</option>`).join("")}</select><button id="xa">Publicar en el tablón</button></div>
 <div class="d">Eventos por evaluar</div>${past.map(e=>`<div class="c r"><span>${F(e.start)} · ${esc(e.title)}</span><span><button class="g" data-a="y|${e.id}">✅</button> <button class="g" data-a="n|${e.id}">❌</button></span></div>`).join("")||`<div class="c">Nada pendiente.</div>`}
 <div class="d">Castigos</div>${pun.sort((a,b)=>b.at-a.at).map(p=>`<div class="c">${esc(p.text)} → ${esc(p.to)} · ${p.st}${p.pub?"":" · sin publicar"}<div class="r">${p.pub?"<span></span>":`<button class="g" data-a="pp|${p.id}">Publicar</button>`}<span><button class="g" data-a="po|${p.id}">✅</button> <button class="g" data-a="pk|${p.id}">❌</button> <button class="g" data-a="pd|${p.id}">🗑️</button></span></div></div>`).join("")}`}
 function draw(){if(!me||document.activeElement?.tagName=="INPUT")return;
@@ -73,9 +75,16 @@ const bt=(i,f)=>$(i)&&($(i).onclick=f),V=i=>$(i).value.trim();
 bt("a",async()=>{if(!V("t")||!V("w"))return alert("Pon título y fecha");await addDoc(collection(db,"events"),{title:V("t"),start:new Date(V("w")).toISOString(),by:me.uid})});
 bt("pa",async()=>{if(!V("pt")||!V("pw"))return alert("Pon plan y fecha");await addDoc(collection(db,"polls"),{title:V("pt"),start:new Date(V("pw")).toISOString(),by:me.uid,votes:{},status:"abierta"})});
 bt("kk",async()=>{if(await sha(V("k"))==HASH){ok=true;sessionStorage.setItem("k","1");draw()}else alert("Clave incorrecta")});
-bt("xa",async()=>{if(!V("xt"))return;await addDoc(collection(db,"punishments"),{text:V("xt"),to:$("xr").value,st:"pendiente",pub:true,at:Date.now()})})}
+bt("rg",async()=>{const m=V("rm").split(",").map(Number).filter(n=>n>0);if(!m.length)return alert("Pon minutos separados por comas");await setDoc(doc(db,"config","reminders"),{mins:m});alert("Guardado")});bt("xa",async()=>{if(!V("xt"))return;await addDoc(collection(db,"punishments"),{text:V("xt"),to:$("xr").value,st:"pendiente",pub:true,at:Date.now()})})}
+const VAPID="BH3YzG5ELLlPJdsZQLtzeO00wl7JPb_JzRJB9Eg3NEBvJdZXujtd8cGEXLWn5JtmNXfqN6T5OJ4roWmFAlitEdY";
+async function avisos(){try{if(!("Notification" in window)||!("serviceWorker" in navigator))return alert("Este navegador no admite avisos. En iPhone abre la web desde el icono de la pantalla de inicio.");
+if(await Notification.requestPermission()!="granted")return alert("Permiso denegado");
+const reg=await navigator.serviceWorker.register("firebase-messaging-sw.js");await navigator.serviceWorker.ready;const m=getMessaging(app);
+const token=await getToken(m,{vapidKey:VAPID,serviceWorkerRegistration:reg});
+await setDoc(doc(db,"tokens",me.uid),{token,role:me.role,email:me.email,at:Date.now()});
+onMessage(m,p=>reg.showNotification(p.notification?.title||"Familia",{body:p.notification?.body||""}));alert("Avisos activados")}catch(e){alert(e.message)}}
 async function act(k,a,b){const D=(c,i)=>doc(db,c,i),U=(c,i,d)=>updateDoc(D(c,i),d);
-if(k=="g")return sync();if(k=="o")return signOut(auth);if(k=="t"){tab=a;return draw()}
+if(k=="g")return sync();if(k=="av")return avisos();if(k=="o")return signOut(auth);if(k=="t"){tab=a;return draw()}
 if(k=="x"&&confirm("¿Borrar?"))await deleteDoc(D("events",a));
 if(k=="e"){const e=evs.find(x=>x.id==a),t=prompt("Título",e.title);if(t)await U("events",a,{title:t})}
 if(k=="v")await U("polls",a,{["votes."+me.uid]:b});
